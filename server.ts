@@ -36,6 +36,7 @@ db.exec(`
     section TEXT, -- 'Quantitative', 'Logical', 'Verbal'
     score INTEGER,
     total INTEGER,
+    is_mock BOOLEAN DEFAULT 0,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(student_id) REFERENCES users(id)
   );
@@ -65,6 +66,13 @@ db.exec(`
     FOREIGN KEY(expert_id) REFERENCES users(id)
   );
 `);
+
+// Migration: Ensure is_mock column exists
+try {
+  db.exec("ALTER TABLE aptitude_scores ADD COLUMN is_mock BOOLEAN DEFAULT 0");
+} catch (e) {
+  // Column already exists or table doesn't exist yet (handled by CREATE TABLE)
+}
 
 async function startServer() {
   const app = express();
@@ -130,9 +138,14 @@ async function startServer() {
 
   // Aptitude
   app.post("/api/aptitude/submit", (req, res) => {
-    const { student_id, section, score, total } = req.body;
-    db.prepare("INSERT INTO aptitude_scores (student_id, section, score, total) VALUES (?, ?, ?, ?)").run(student_id, section, score, total);
-    res.json({ success: true });
+    const { student_id, section, score, total, is_mock } = req.body;
+    try {
+      db.prepare("INSERT INTO aptitude_scores (student_id, section, score, total, is_mock) VALUES (?, ?, ?, ?, ?)").run(student_id, section, score, total, is_mock ? 1 : 0);
+      res.json({ success: true });
+    } catch (e) {
+      console.error("Error submitting aptitude score:", e);
+      res.status(500).json({ error: "Failed to submit score" });
+    }
   });
 
   app.get("/api/aptitude/scores/:studentId", (req, res) => {
@@ -221,6 +234,23 @@ async function startServer() {
     const { rating, feedback } = req.body;
     db.prepare("UPDATE bookings SET rating = ?, feedback = ?, status = 'completed' WHERE id = ?").run(rating, feedback, req.params.id);
     res.json({ success: true });
+  });
+
+  app.get("/api/experts/:id/earnings", (req, res) => {
+    const completed = db.prepare("SELECT COUNT(*) as count FROM bookings WHERE expert_id = ? AND status = 'completed'").get(req.params.id);
+    const totalEarnings = (completed.count || 0) * 50; // $50 per session
+    res.json({ total: totalEarnings, count: completed.count });
+  });
+
+  app.get("/api/experts/:id/reviews", (req, res) => {
+    const reviews = db.prepare(`
+      SELECT b.rating, b.feedback, b.start_time, u.name as student_name 
+      FROM bookings b 
+      JOIN users u ON b.student_id = u.id 
+      WHERE b.expert_id = ? AND b.rating IS NOT NULL
+      ORDER BY b.start_time DESC
+    `).all(req.params.id);
+    res.json(reviews);
   });
 
   // Vite middleware for development

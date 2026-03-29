@@ -14,6 +14,8 @@ export interface User {
   linkedin_url?: string;
   skills?: string;
   grad_year?: string;
+  company?: string;
+  years_of_experience?: string;
 }
 
 export interface AptitudeScore {
@@ -22,6 +24,7 @@ export interface AptitudeScore {
   section: string;
   score: number;
   total: number;
+  is_mock: boolean;
   timestamp: string;
 }
 
