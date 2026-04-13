@@ -1,0 +1,9 @@
+Using URL: postgresql://postgres:sqlom1234@localhost:5432/placement_prep
+Current database: placement_prep
+Search path: "$user", public
+Inserted user with id: 1
+User count after insert: 1
+Users: [{"id":1,"email":"directtest@test.com","name":"Direct Test"}]
+
+After reconnect, user count: 1
+Users after reconnect: [{"id":1,"email":"directtest@test.com","name":"Direct Test"}]

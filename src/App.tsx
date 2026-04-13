@@ -50,7 +50,11 @@ import {
   Trophy,
   Activity,
   Sparkles,
-  Trash2
+  Trash2,
+  Shield,
+  XCircle,
+  Phone,
+  AlertTriangle
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -123,7 +127,7 @@ const ExpertAvailabilityManager = ({ expertId, onUpdate }: { expertId: number, o
   ];
 
   useEffect(() => {
-    fetch(`/api/availability/${expertId}`)
+    fetch(`/api/availability/${expertId}?t=${Date.now()}`)
       .then(res => res.json())
       .then(data => setSlots(data))
       .catch(e => console.error(e));
@@ -200,7 +204,13 @@ const ExpertAvailabilityManager = ({ expertId, onUpdate }: { expertId: number, o
             const d = new Date(day);
             d.setHours(h, m, 0, 0);
             
-            if (d < new Date()) return null;
+            if (d < new Date()) {
+              return (
+                <Button key={time} variant="outline" disabled className="h-12 rounded-xl font-bold opacity-30 cursor-not-allowed">
+                  {time}
+                </Button>
+              )
+            }
 
             const iso = d.toISOString();
             const selected = slots.some(s => s.start_time === iso);
@@ -1038,18 +1048,43 @@ const AptitudeView = ({
 }) => {
   const [section, setSection] = useState<string | null>(null);
   const [quizStarted, setQuizStarted] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
   const [quizFinished, setQuizFinished] = useState(false);
   const [timeLeft, setTimeLeft] = useState(60);
 
+  const answersRef = React.useRef(answers);
+  useEffect(() => { answersRef.current = answers; }, [answers]);
+
+  const currentQuestionRef = React.useRef(currentQuestion);
+  useEffect(() => { currentQuestionRef.current = currentQuestion; }, [currentQuestion]);
+
+  // Reset timer whenever the question changes
+  useEffect(() => {
+    if (quizStarted && !quizFinished) {
+      setTimeLeft(60);
+    }
+  }, [currentQuestion, quizStarted, quizFinished]);
+
+  // Per-question countdown timer
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (quizStarted && !quizFinished) {
       timer = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
-            handleAnswer(-1); // Auto-advance on timeout
+            // Time's up for this question — auto-advance
+            const questions = getQuestions();
+            const curQ = currentQuestionRef.current;
+            if (curQ >= questions.length - 1) {
+              // Last question — finish the quiz
+              clearInterval(timer);
+              finishQuiz(answersRef.current);
+            } else {
+              // Move to next question
+              setCurrentQuestion(curQ + 1);
+            }
             return 60;
           }
           return prev - 1;
@@ -1057,20 +1092,37 @@ const AptitudeView = ({
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [quizStarted, quizFinished, currentQuestion]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quizStarted, quizFinished]);
 
   useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (quizStarted && !quizFinished) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden' && quizStarted && !quizFinished) {
-        finishQuiz(answers);
+        finishQuiz(answersRef.current);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [quizStarted, quizFinished, answers]);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quizStarted, quizFinished]);
 
-  const startQuiz = (s: string) => {
+  const startInstructions = (s: string) => {
     setSection(s);
+    setShowInstructions(true);
+  };
+
+  const startQuiz = () => {
+    setShowInstructions(false);
     setQuizStarted(true);
     setCurrentQuestion(0);
     setAnswers([]);
@@ -1089,18 +1141,10 @@ const AptitudeView = ({
     return (MOCK_QUESTIONS[section!] || []).map(q => ({ ...q, sectionName: section }));
   };
 
-  const handleAnswer = (idx: number) => {
-    const questions = getQuestions();
+  const handleSelectOption = (idx: number) => {
     const newAnswers = [...answers];
     newAnswers[currentQuestion] = idx;
     setAnswers(newAnswers);
-    
-    if (currentQuestion < (questions.length || 0) - 1) {
-      setCurrentQuestion(currentQuestion + 1);
-      setTimeLeft(60);
-    } else {
-      finishQuiz(newAnswers);
-    }
   };
 
   const finishQuiz = async (finalAnswers: number[]) => {
@@ -1172,7 +1216,42 @@ const AptitudeView = ({
     await fetchUserData(user!);
   };
 
-  if (!quizStarted) {
+  if (showInstructions && !quizStarted) {
+    return (
+      <div className="max-w-2xl mx-auto py-12">
+        <Card className="p-10 border-none shadow-2xl rounded-[3rem]">
+          <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-8">
+            <BrainCircuit className="w-10 h-10 text-indigo-600" />
+          </div>
+          <h2 className="text-3xl font-black text-slate-900 mb-6">Instructions for {section}</h2>
+          <ul className="space-y-4 mb-8 text-slate-600 font-medium">
+            <li className="flex items-start gap-3">
+              <Clock className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+              Each question has a <span className="font-black text-indigo-600">60-second timer</span>. Answer before time runs out!
+            </li>
+            <li className="flex items-start gap-3">
+              <ChevronRight className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+              When the timer expires, the quiz <span className="font-black text-slate-900">automatically moves to the next question</span>.
+            </li>
+            <li className="flex items-start gap-3">
+              <RotateCcw className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+              You <span className="font-black text-rose-600">cannot go back</span> to a previous question once you move forward.
+            </li>
+            <li className="flex items-start gap-3">
+              <Target className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+              The test automatically submits if you leave the page.
+            </li>
+          </ul>
+          <div className="flex gap-4">
+            <Button variant="outline" onClick={() => setShowInstructions(false)} className="flex-1 py-4 rounded-2xl font-bold">Cancel</Button>
+            <Button onClick={startQuiz} className="flex-1 py-4 rounded-2xl font-bold bg-indigo-600 hover:bg-indigo-700">Start Test</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!quizStarted && !showInstructions) {
     return (
       <div className="space-y-10 pb-12">
         <div className="relative overflow-hidden bg-gradient-to-br from-indigo-600 to-blue-700 rounded-[2.5rem] p-8 lg:p-12 text-white shadow-2xl shadow-indigo-200">
@@ -1203,7 +1282,7 @@ const AptitudeView = ({
                 "group relative overflow-hidden p-8 border-none bg-white shadow-sm hover:shadow-xl transition-all cursor-pointer rounded-[2rem]",
                 s.name === "Full Mock Test" ? "bg-indigo-900 text-white shadow-indigo-200" : ""
               )} 
-              onClick={() => startQuiz(s.name)}
+              onClick={() => startInstructions(s.name)}
             >
               <div className={cn(
                 "w-14 h-14 rounded-2xl flex items-center justify-center mb-6 transition-all group-hover:scale-110",
@@ -1275,7 +1354,7 @@ const AptitudeView = ({
             <Button className="w-full py-6 rounded-2xl text-lg font-bold shadow-lg shadow-indigo-100" onClick={() => setQuizStarted(false)}>
               Back to Aptitude
             </Button>
-            <Button variant="ghost" className="w-full text-slate-400 font-bold" onClick={() => startQuiz(section!)}>
+            <Button variant="ghost" className="w-full text-slate-400 font-bold" onClick={() => startInstructions(section!)}>
               <RotateCcw className="w-4 h-4 mr-2" /> Retake Quiz
             </Button>
           </div>
@@ -1307,8 +1386,8 @@ const AptitudeView = ({
             "flex items-center gap-3 px-6 py-3 rounded-2xl font-black text-xl shadow-sm transition-colors",
             timeLeft <= 10 ? "bg-rose-50 text-rose-600 animate-pulse" : "bg-white text-slate-900"
           )}>
-            <Clock className={cn("w-5 h-5", timeLeft <= 10 ? "text-rose-600" : "text-indigo-600")} />
-            {timeLeft}s
+            <Clock className={cn("w-5 h-5", timeLeft <= 15 ? "text-rose-600" : "text-indigo-600")} />
+            0:{String(timeLeft).padStart(2, '0')}
           </div>
           <div className="hidden md:block w-48 h-3 bg-slate-100 rounded-full overflow-hidden">
             <div 
@@ -1330,40 +1409,74 @@ const AptitudeView = ({
           />
         </div>
 
+        {/* Per-question timer label */}
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Time remaining for this question</span>
+          <span className={cn("text-xs font-black", timeLeft <= 10 ? "text-rose-600" : "text-indigo-600")}>{timeLeft}s</span>
+        </div>
+
         <p className="text-2xl md:text-3xl font-black text-slate-900 leading-tight mb-12">
           {q.text}
         </p>
 
         <div className="grid gap-4">
-          {q.options.map((opt: string, i: number) => (
-            <button 
-              key={i}
-              className="group w-full p-6 text-left rounded-[1.5rem] border-2 border-slate-50 hover:border-indigo-600 hover:bg-indigo-50 transition-all flex items-center justify-between"
-              onClick={() => handleAnswer(i)}
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl bg-slate-50 group-hover:bg-indigo-600 group-hover:text-white flex items-center justify-center font-black text-slate-400 transition-colors">
-                  {String.fromCharCode(65 + i)}
+          {q.options.map((opt: string, i: number) => {
+            const isSelected = answers[currentQuestion] === i;
+            return (
+              <button 
+                key={i}
+                className={cn(
+                  "group w-full p-6 text-left rounded-[1.5rem] border-2 transition-all flex items-center justify-between",
+                  isSelected ? "border-indigo-600 bg-indigo-50" : "border-slate-50 hover:border-indigo-600 hover:bg-indigo-50"
+                )}
+                onClick={() => handleSelectOption(i)}
+              >
+                <div className="flex items-center gap-4">
+                  <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center font-black transition-colors",
+                    isSelected ? "bg-indigo-600 text-white" : "bg-slate-50 text-slate-400 group-hover:bg-indigo-600 group-hover:text-white"
+                  )}>
+                    {String.fromCharCode(65 + i)}
+                  </div>
+                  <span className={cn("text-lg font-bold transition-colors",
+                    isSelected ? "text-indigo-900" : "text-slate-700 group-hover:text-indigo-900"
+                  )}>{opt}</span>
                 </div>
-                <span className="text-lg font-bold text-slate-700 group-hover:text-indigo-900 transition-colors">{opt}</span>
-              </div>
-              <div className="w-6 h-6 rounded-full border-2 border-slate-200 group-hover:border-indigo-600 group-hover:bg-indigo-600 transition-all" />
-            </button>
-          ))}
+                <div className={cn("w-6 h-6 rounded-full border-2 transition-all flex items-center justify-center",
+                  isSelected ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-200 group-hover:border-indigo-600"
+                )}>
+                  {isSelected && <div className="w-2.5 h-2.5 bg-white rounded-full" />}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </Card>
       
-      <div className="mt-8 flex justify-between items-center px-4">
-        <p className="text-slate-400 text-sm font-bold flex items-center gap-2">
-          <Activity className="w-4 h-4" />
-          Auto-submits if you switch tabs
-        </p>
-        <button 
-          onClick={() => handleAnswer(-1)}
-          className="text-slate-400 hover:text-indigo-600 font-bold text-sm flex items-center gap-1 transition-colors"
-        >
-          Skip Question <ChevronRight className="w-4 h-4" />
-        </button>
+      <div className="mt-8 flex justify-end items-center px-4">
+        <div className="flex gap-4">
+          <Button 
+            variant="ghost" 
+            onClick={() => setCurrentQuestion(p => Math.min(questions.length - 1, p + 1))}
+            className="text-slate-500 hover:text-indigo-600 font-bold"
+          >
+            Skip Question
+          </Button>
+          {currentQuestion === questions.length - 1 ? (
+             <Button 
+               onClick={() => finishQuiz(answers)}
+               className="rounded-xl px-8 font-bold bg-emerald-600 hover:bg-emerald-700"
+             >
+               Submit Test
+             </Button>
+          ) : (
+             <Button 
+               onClick={() => setCurrentQuestion(p => p + 1)}
+               className="rounded-xl px-8 font-bold bg-indigo-600 flex items-center gap-2"
+             >
+               Next <ChevronRight className="w-4 h-4" />
+             </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1441,18 +1554,28 @@ const InterviewsView = ({
   const [viewingStudentProfile, setViewingStudentProfile] = useState<Booking | null>(null);
   const [ratingBooking, setRatingBooking] = useState<Booking | null>(null);
 
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    if (bookingStep === 'list' && user) {
+      timeout = setInterval(() => {
+        fetchUserData(user);
+      }, 5000);
+    }
+    return () => clearInterval(timeout);
+  }, [bookingStep, user, fetchUserData]);
+
   const startBooking = () => setBookingStep('select_role');
 
   const handleRoleSelect = async (role: string) => {
     setSelectedRole(role);
-    const res = await fetch(`/api/experts?role=${encodeURIComponent(role)}`);
+    const res = await fetch(`/api/experts?role=${encodeURIComponent(role)}&t=${Date.now()}`);
     setAvailableExperts(await res.json());
     setBookingStep('select_expert');
   };
 
   const handleExpertSelect = async (expert: User) => {
     setSelectedExpert(expert);
-    const res = await fetch(`/api/availability/${expert.id}`);
+    const res = await fetch(`/api/availability/${expert.id}?t=${Date.now()}`);
     const allSlots = await res.json();
     setExpertSlots(allSlots.filter((s: any) => s.status === 'available' && new Date(s.start_time) > new Date()));
     setBookingStep('select_slot');
@@ -1480,7 +1603,11 @@ const InterviewsView = ({
 
   const joinMeeting = async (booking: Booking) => {
     if (user?.role === 'student') {
-      const res = await fetch(`/api/bookings/${booking.id}/join`, { method: 'POST', body: JSON.stringify({ role: 'student' }) });
+      const res = await fetch(`/api/bookings/${booking.id}/join`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'student' }) 
+      });
       const data = await res.json();
       if (data.expert_joined) {
         window.open(booking.meet_link, '_blank');
@@ -1571,9 +1698,27 @@ const InterviewsView = ({
                     <Button variant="outline" onClick={() => setRatingBooking(b)} className="rounded-xl font-bold border-amber-200 text-amber-700 hover:bg-amber-50">Rate Student</Button>
                   )}
                   {b.status === 'scheduled' ? (
-                    <Button onClick={() => joinMeeting(b)} className="flex gap-2 items-center rounded-xl px-8 font-bold bg-indigo-600 hover:bg-indigo-700">
-                      <Video className="w-4 h-4" /> Join Meeting
-                    </Button>
+                    <div className="flex flex-col items-end gap-1">
+                      <Button 
+                        onClick={() => joinMeeting(b)} 
+                        disabled={user?.role === 'expert' ? new Date() < new Date(b.start_time) : !b.expert_joined}
+                        className={cn("flex gap-2 items-center rounded-xl px-8 font-bold transition-all", 
+                          (user?.role === 'expert' ? new Date() < new Date(b.start_time) : !b.expert_joined)
+                            ? "bg-slate-200 text-slate-400 cursor-not-allowed border-none shadow-none"
+                            : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                        )}
+                      >
+                        <Video className="w-4 h-4" /> Join Meeting
+                      </Button>
+                      {user?.role === 'expert' && new Date() < new Date(b.start_time) && (
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Available at start time</span>
+                      )}
+                      {user?.role === 'student' && !b.expert_joined && (
+                        <span className="text-[10px] text-amber-500 font-bold uppercase tracking-wider flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin inline" /> Waiting for expert
+                        </span>
+                      )}
+                    </div>
                   ) : (
                     <div className="flex flex-col items-end gap-2">
                       <div className="flex gap-1">
@@ -2462,8 +2607,9 @@ const ProfileView = ({ user, setUser }: { user: User, setUser: (u: User) => void
 const ResumeAnalyzerView = () => {
   const [file, setFile] = useState<File | null>(null);
   const [targetRole, setTargetRole] = useState('');
-  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'suggestions' | 'ats'>('overview');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -2479,50 +2625,28 @@ const ResumeAnalyzerView = () => {
   const analyzeResume = async () => {
     if (!file || !targetRole) return;
     setLoading(true);
+    setAnalysis(null);
     try {
-      // Convert file to base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const base64 = (reader.result as string).split(',')[1];
-          resolve(base64);
-        };
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(file);
-      const base64Data = await base64Promise;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('targetRole', targetRole);
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                mimeType: "application/pdf",
-                data: base64Data
-              }
-            },
-            {
-              text: `Analyze this resume for the role of ${targetRole}. 
-              
-              CRITICAL: Start your response with "Overall Score: [X]/100" where X is the numerical score.
-              
-              Provide a detailed breakdown including:
-              1. Overall Score (out of 100)
-              2. Key Strengths
-              3. Areas for Improvement
-              4. Actionable Suggestions
-              
-              Format the output using professional Markdown with clear headings and bullet points. Use bold text for emphasis.`
-            }
-          ]
-        }
+      const response = await fetch('/api/resume/analyze', {
+        method: 'POST',
+        body: formData,
       });
-      setAnalysis(response.text || "Failed to generate analysis.");
-    } catch (error) {
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to analyze resume');
+      }
+
+      const data = await response.json();
+      setAnalysis(data);
+      setActiveTab('overview');
+    } catch (error: any) {
       console.error(error);
-      setAnalysis("Error analyzing resume. Please try again. Make sure the PDF is not password protected.");
+      alert('Error analyzing resume: ' + error.message);
     }
     setLoading(false);
   };
@@ -2532,135 +2656,389 @@ const ResumeAnalyzerView = () => {
     setTargetRole('');
     setAnalysis(null);
     setLoading(false);
+    setActiveTab('overview');
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return { bg: 'bg-emerald-50', text: 'text-emerald-600', ring: 'stroke-emerald-500', label: 'Excellent' };
+    if (score >= 60) return { bg: 'bg-amber-50', text: 'text-amber-600', ring: 'stroke-amber-500', label: 'Good' };
+    if (score >= 40) return { bg: 'bg-orange-50', text: 'text-orange-600', ring: 'stroke-orange-500', label: 'Fair' };
+    return { bg: 'bg-rose-50', text: 'text-rose-600', ring: 'stroke-rose-500', label: 'Needs Work' };
+  };
+
+  const getCategoryColor = (score: number, max: number) => {
+    const pct = (score / max) * 100;
+    if (pct >= 75) return 'bg-emerald-500';
+    if (pct >= 50) return 'bg-amber-500';
+    if (pct >= 25) return 'bg-orange-500';
+    return 'bg-rose-500';
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <div className="flex items-center gap-3">
-        <div className="p-3 bg-indigo-100 rounded-xl">
-          <FileText className="w-6 h-6 text-indigo-600" />
-        </div>
-        <div>
-          <h2 className="text-3xl font-bold">AI Resume Analyzer</h2>
-          <p className="text-slate-500">Upload your PDF resume for expert AI feedback</p>
+    <div className="max-w-6xl mx-auto space-y-8 pb-12">
+      {/* Header */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-indigo-600 to-violet-700 rounded-[2.5rem] p-8 lg:p-12 text-white shadow-2xl shadow-indigo-200">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 blur-3xl rounded-full -mr-32 -mt-32" />
+        <div className="absolute bottom-0 left-0 w-64 h-64 bg-violet-400/20 blur-3xl rounded-full -ml-32 -mb-32" />
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-bold uppercase tracking-wider">
+              <FileText className="w-3.5 h-3.5 text-amber-300" />
+              Powered by Claude AI
+            </div>
+            <h2 className="text-4xl lg:text-5xl font-black tracking-tight">
+              Resume <span className="text-indigo-200">Analyzer</span>
+            </h2>
+            <p className="text-lg text-indigo-100 max-w-xl leading-relaxed">
+              Get an instant ATS score, detailed breakdown, and actionable suggestions to make your resume stand out.
+            </p>
+          </div>
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-8">
-        <Card className="space-y-6">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2 uppercase tracking-wider">Target Role</label>
-            <select 
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-              value={targetRole}
-              onChange={e => setTargetRole(e.target.value)}
-            >
-              <option value="">Select a role...</option>
-              {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-          
-          <div className="relative group">
-            <label className="block text-sm font-bold text-slate-700 mb-2 uppercase tracking-wider">Upload PDF Resume</label>
-            <div className={cn(
-              "border-2 border-dashed rounded-2xl p-8 transition-all flex flex-col items-center justify-center text-center",
-              file ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:border-indigo-500 hover:bg-indigo-50"
-            )}>
-              <input 
-                type="file" 
-                accept=".pdf"
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                onChange={handleFileChange}
-              />
-              <div className={cn(
-                "w-16 h-16 rounded-full flex items-center justify-center mb-4",
-                file ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-400 group-hover:bg-indigo-100 group-hover:text-indigo-600"
-              )}>
-                {file ? <CheckCircle2 className="w-8 h-8" /> : <Upload className="w-8 h-8" />}
-              </div>
-              <h4 className="font-bold text-slate-700">
-                {file ? file.name : "Click or drag to upload"}
-              </h4>
-              <p className="text-slate-500 text-sm mt-1">
-                {file ? `${(file.size / 1024).toFixed(1)} KB` : "PDF files only, max 5MB"}
-              </p>
+      {/* Upload Section */}
+      {!analysis && (
+        <div className="grid lg:grid-cols-2 gap-8">
+          <Card className="p-8 space-y-6 border-none shadow-sm bg-white">
+            <div>
+              <label className="block text-sm font-black text-slate-400 uppercase tracking-widest mb-3">Target Role</label>
+              <select
+                className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all bg-white font-medium text-slate-800"
+                value={targetRole}
+                onChange={e => setTargetRole(e.target.value)}
+              >
+                <option value="">Select a role...</option>
+                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
             </div>
+
+            <div className="relative group">
+              <label className="block text-sm font-black text-slate-400 uppercase tracking-widest mb-3">Upload PDF Resume</label>
+              <div className={cn(
+                "border-2 border-dashed rounded-[1.5rem] p-10 transition-all flex flex-col items-center justify-center text-center cursor-pointer",
+                file ? "border-emerald-400 bg-emerald-50/50" : "border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/50"
+              )}>
+                <input
+                  type="file"
+                  accept=".pdf"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={handleFileChange}
+                />
+                <div className={cn(
+                  "w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-all",
+                  file ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-400 group-hover:bg-indigo-100 group-hover:text-indigo-600"
+                )}>
+                  {file ? <CheckCircle2 className="w-8 h-8" /> : <Upload className="w-8 h-8" />}
+                </div>
+                <h4 className="font-bold text-slate-700 text-lg">
+                  {file ? file.name : "Click or drag to upload"}
+                </h4>
+                <p className="text-slate-500 text-sm mt-1">
+                  {file ? `${(file.size / 1024).toFixed(1)} KB` : "PDF files only, max 5MB"}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              className="w-full py-5 text-lg flex items-center justify-center gap-2 rounded-2xl font-bold bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100"
+              onClick={analyzeResume}
+              disabled={loading || !file || !targetRole}
+            >
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileUp className="w-5 h-5" />}
+              {loading ? 'Analyzing with Claude AI...' : 'Analyze Resume'}
+            </Button>
+          </Card>
+
+          <Card className="p-8 border-none shadow-sm bg-white flex flex-col items-center justify-center text-center">
+            <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-8">
+              <BrainCircuit className="w-12 h-12 text-indigo-400" />
+            </div>
+            <h4 className="text-2xl font-black text-slate-800 mb-3">AI-Powered Analysis</h4>
+            <p className="text-slate-500 max-w-sm mx-auto leading-relaxed mb-8">
+              Our system uses Claude AI to deeply understand your resume, then scores it across 6 key categories with actionable feedback.
+            </p>
+            <div className="grid grid-cols-2 gap-4 w-full max-w-sm">
+              {[
+                { icon: Target, label: "ATS Score" },
+                { icon: CheckCircle2, label: "Strengths" },
+                { icon: AlertTriangle, label: "Improvements" },
+                { icon: Zap, label: "Keywords" }
+              ].map((item, i) => (
+                <div key={i} className="p-4 bg-slate-50 rounded-2xl flex items-center gap-3">
+                  <item.icon className="w-5 h-5 text-indigo-500" />
+                  <span className="text-sm font-bold text-slate-600">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Results Section */}
+      {analysis && (
+        <div className="space-y-8">
+          {/* Score + Summary Row */}
+          <div className="grid lg:grid-cols-3 gap-8">
+            {/* Score Card */}
+            <Card className="p-8 border-none shadow-sm bg-white flex flex-col items-center justify-center text-center">
+              <div className="relative w-40 h-40 mb-6">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
+                  <circle cx="60" cy="60" r="52" fill="none" stroke="#f1f5f9" strokeWidth="10" />
+                  <circle
+                    cx="60" cy="60" r="52" fill="none"
+                    className={getScoreColor(analysis.score).ring}
+                    strokeWidth="10"
+                    strokeLinecap="round"
+                    strokeDasharray={`${(analysis.score / 100) * 327} 327`}
+                    style={{ transition: 'stroke-dasharray 1s ease-out' }}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className={cn("text-4xl font-black", getScoreColor(analysis.score).text)}>{analysis.score}</span>
+                  <span className="text-xs font-bold text-slate-400 uppercase">/100</span>
+                </div>
+              </div>
+              <span className={cn("px-4 py-1.5 rounded-full text-sm font-black", getScoreColor(analysis.score).bg, getScoreColor(analysis.score).text)}>
+                {getScoreColor(analysis.score).label}
+              </span>
+              <p className="text-sm text-slate-500 mt-3">For <span className="font-bold text-indigo-600">{analysis.targetRole}</span></p>
+            </Card>
+
+            {/* Parsed Info Card */}
+            <Card className="lg:col-span-2 p-8 border-none shadow-sm bg-white">
+              <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Detected Information</h4>
+              <div className="grid md:grid-cols-2 gap-4">
+                {[
+                  { label: "Name", value: analysis.parsedInfo.name, icon: UserIcon },
+                  { label: "Email", value: analysis.parsedInfo.email || "Not detected", icon: Mail },
+                  { label: "Phone", value: analysis.parsedInfo.phone || "Not detected", icon: Phone },
+                  { label: "Skills", value: `${analysis.parsedInfo.skillsCount} detected`, icon: Zap },
+                  { label: "Experience", value: `${analysis.parsedInfo.experienceCount} positions`, icon: Briefcase },
+                  { label: "Education", value: `${analysis.parsedInfo.educationCount} entries`, icon: GraduationCap }
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                    <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center">
+                      <item.icon className="w-4 h-4 text-indigo-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{item.label}</p>
+                      <p className="text-sm font-bold text-slate-700 truncate">{item.value}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {analysis.parsedInfo.skills.length > 0 && (
+                <div className="mt-6">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-3">Detected Skills</p>
+                  <div className="flex flex-wrap gap-2">
+                    {analysis.parsedInfo.skills.map((skill: string, i: number) => (
+                      <span key={i} className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold">
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
           </div>
 
-          <Button 
-            className="w-full py-4 text-lg flex items-center justify-center gap-2" 
-            onClick={analyzeResume}
-            disabled={loading || !file || !targetRole}
-          >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileUp className="w-5 h-5" />}
-            {loading ? 'Analyzing Resume...' : 'Analyze Resume'}
-          </Button>
+          {/* Tab Navigation */}
+          <div className="bg-white rounded-2xl p-1.5 shadow-sm border border-slate-100 flex gap-1">
+            {([
+              { id: 'overview', label: 'Score Breakdown', icon: BarChart3 },
+              { id: 'suggestions', label: 'Suggestions', icon: Lightbulb },
+              { id: 'ats', label: 'ATS Optimization', icon: Shield }
+            ] as const).map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-bold transition-all",
+                  activeTab === tab.id
+                    ? "bg-indigo-600 text-white shadow-md"
+                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                )}
+              >
+                <tab.icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-          {analysis && (
-            <Button 
-              variant="ghost" 
-              className="w-full py-3 text-slate-400 hover:text-indigo-600 flex items-center justify-center gap-2"
+          {/* Tab Content */}
+          {activeTab === 'overview' && (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {analysis.breakdown.map((item: any, i: number) => (
+                <Card key={i} className="p-6 border-none shadow-sm bg-white">
+                  <div className="flex items-center justify-between mb-4">
+                    <h5 className="font-bold text-slate-800 text-sm">{item.category}</h5>
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-lg text-xs font-black",
+                      (item.score / item.max) >= 0.75 ? "bg-emerald-50 text-emerald-600" :
+                      (item.score / item.max) >= 0.5 ? "bg-amber-50 text-amber-600" :
+                      "bg-rose-50 text-rose-600"
+                    )}>
+                      {item.score}/{item.max}
+                    </span>
+                  </div>
+                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden mb-3">
+                    <div
+                      className={cn("h-full rounded-full transition-all duration-1000", getCategoryColor(item.score, item.max))}
+                      style={{ width: `${(item.score / item.max) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium">{item.feedback}</p>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {activeTab === 'suggestions' && (
+            <div className="grid lg:grid-cols-2 gap-8">
+              {/* Strengths */}
+              <Card className="p-8 border-none shadow-sm bg-white">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-800">Strengths</h4>
+                    <p className="text-xs text-slate-400">{analysis.strengths.length} identified</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {analysis.strengths.length > 0 ? analysis.strengths.map((s: string, i: number) => (
+                    <div key={i} className="flex items-start gap-3 p-3 bg-emerald-50/50 rounded-xl">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                      <span className="text-sm text-slate-700 font-medium">{s}</span>
+                    </div>
+                  )) : (
+                    <p className="text-sm text-slate-400 italic py-4 text-center">No specific strengths detected. Upload a more complete resume.</p>
+                  )}
+                </div>
+              </Card>
+
+              {/* Suggestions */}
+              <Card className="p-8 border-none shadow-sm bg-white">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
+                    <Lightbulb className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-800">Suggestions</h4>
+                    <p className="text-xs text-slate-400">{analysis.suggestions.length} recommendations</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {analysis.suggestions.length > 0 ? analysis.suggestions.map((s: string, i: number) => (
+                    <div key={i} className="flex items-start gap-3 p-3 bg-amber-50/50 rounded-xl">
+                      <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+                      <span className="text-sm text-slate-700 font-medium">{s}</span>
+                    </div>
+                  )) : (
+                    <p className="text-sm text-slate-400 italic py-4 text-center">Your resume looks great! No suggestions.</p>
+                  )}
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === 'ats' && (
+            <div className="space-y-8">
+              <div className="grid lg:grid-cols-2 gap-8">
+                {/* ATS Issues */}
+                <Card className="p-8 border-none shadow-sm bg-white">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center">
+                      <Shield className="w-5 h-5 text-rose-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-slate-800">ATS Issues</h4>
+                      <p className="text-xs text-slate-400">{analysis.atsOptimization.issues.length} found</p>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {analysis.atsOptimization.issues.length > 0 ? analysis.atsOptimization.issues.map((issue: string, i: number) => (
+                      <div key={i} className="flex items-start gap-3 p-3 bg-rose-50/50 rounded-xl">
+                        <XCircle className="w-4 h-4 text-rose-500 mt-0.5 shrink-0" />
+                        <span className="text-sm text-slate-700 font-medium">{issue}</span>
+                      </div>
+                    )) : (
+                      <div className="text-center py-8">
+                        <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
+                        <p className="text-sm text-emerald-600 font-bold">No ATS issues detected!</p>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+
+                {/* Keywords */}
+                <Card className="p-8 border-none shadow-sm bg-white">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+                      <Zap className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-slate-800">Keyword Match</h4>
+                      <p className="text-xs text-slate-400">For {analysis.targetRole}</p>
+                    </div>
+                  </div>
+
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">Matched Keywords</p>
+                  <div className="flex flex-wrap gap-2 mb-6">
+                    {analysis.atsOptimization.matchedKeywords.length > 0 ? analysis.atsOptimization.matchedKeywords.map((kw: string, i: number) => (
+                      <span key={i} className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-xs font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> {kw}
+                      </span>
+                    )) : (
+                      <p className="text-sm text-slate-400 italic">No matching keywords found</p>
+                    )}
+                  </div>
+
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">Missing Keywords</p>
+                  <div className="flex flex-wrap gap-2">
+                    {analysis.atsOptimization.missingKeywords.length > 0 ? analysis.atsOptimization.missingKeywords.map((kw: string, i: number) => (
+                      <span key={i} className="px-3 py-1 bg-rose-50 text-rose-600 rounded-full text-xs font-bold flex items-center gap-1">
+                        <XCircle className="w-3 h-3" /> {kw}
+                      </span>
+                    )) : (
+                      <p className="text-sm text-emerald-600 font-bold">All keywords covered!</p>
+                    )}
+                  </div>
+                </Card>
+              </div>
+
+              {/* ATS Tips */}
+              <Card className="p-8 border-none shadow-sm bg-indigo-900 text-white">
+                <div className="flex items-center gap-3 mb-6">
+                  <Lightbulb className="w-6 h-6 text-amber-400" />
+                  <h4 className="font-black text-lg">ATS Optimization Tips</h4>
+                </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  {analysis.atsOptimization.tips.map((tip: string, i: number) => (
+                    <div key={i} className="flex items-start gap-3 p-4 bg-white/10 rounded-xl">
+                      <ChevronRight className="w-4 h-4 text-indigo-300 mt-0.5 shrink-0" />
+                      <span className="text-sm text-indigo-100 font-medium">{tip}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* Reset Button */}
+          <div className="text-center">
+            <Button
+              variant="ghost"
+              className="text-slate-400 hover:text-indigo-600 font-bold flex items-center gap-2 mx-auto"
               onClick={resetAnalyzer}
             >
-              <RotateCcw className="w-4 h-4" />
-              Reset & Start Over
+              <RotateCcw className="w-4 h-4" /> Analyze Another Resume
             </Button>
-          )}
-        </Card>
-
-        <Card className="bg-white border-2 border-slate-100 h-[600px] flex flex-col overflow-hidden">
-          {analysis ? (
-            <div className="flex flex-col h-full">
-              {/* Score Header */}
-              <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Analysis Result</h4>
-                  <p className="text-xs text-slate-400 mt-1">Tailored for {targetRole}</p>
-                </div>
-                {(() => {
-                  const scoreMatch = analysis.match(/Score:\s*(\d+)/i) || analysis.match(/(\d+)\/100/);
-                  const score = scoreMatch ? parseInt(scoreMatch[1]) : null;
-                  if (!score) return null;
-                  return (
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <p className="text-2xl font-black text-indigo-600 leading-none">{score}</p>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">Score</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-full border-4 border-slate-100 flex items-center justify-center relative overflow-hidden">
-                        <div 
-                          className="absolute inset-0 bg-indigo-600 origin-bottom transition-all duration-1000" 
-                          style={{ height: `${score}%` }}
-                        />
-                        <span className="relative z-10 text-[10px] font-bold text-slate-700 mix-blend-difference invert">
-                          {score}%
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Scrollable Content */}
-              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                <div className="prose prose-indigo prose-sm max-w-none prose-headings:text-slate-800 prose-p:text-slate-600 prose-strong:text-indigo-600 prose-li:text-slate-600">
-                  <Markdown>{analysis}</Markdown>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8">
-              <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6 shadow-inner">
-                <FileText className="w-10 h-10 text-slate-300" />
-              </div>
-              <h4 className="text-xl font-bold text-slate-800">Ready for Analysis</h4>
-              <p className="text-slate-500 text-sm mt-2 max-w-[250px] mx-auto">
-                Upload your PDF resume and select your target role to get a detailed AI breakdown.
-              </p>
-            </div>
-          )}
-        </Card>
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -3708,8 +4086,11 @@ export default function App() {
       const u = await res.json();
       setUser(u);
       localStorage.setItem('prep_user', JSON.stringify(u));
+      setAuthForm({ email: '', password: '', name: '', role: 'student', expertise: '' });
       setView('dashboard');
       fetchUserData(u);
+    } else {
+      alert('Error registering or email already exists.');
     }
     setLoading(false);
   };
@@ -3717,6 +4098,7 @@ export default function App() {
   const logout = () => {
     setUser(null);
     localStorage.removeItem('prep_user');
+    setAuthForm({ email: '', password: '', name: '', role: 'student', expertise: '' });
     setView('landing');
   };
 
@@ -3738,7 +4120,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-gray-100 flex flex-col">
+      <aside className="w-64 bg-white border-r border-gray-100 flex flex-col overflow-y-auto overflow-x-hidden">
         <div className="p-8 flex items-center gap-2 font-bold text-xl text-indigo-600">
           <Award className="w-6 h-6" /> PrepMaster
         </div>

@@ -1,0 +1,16 @@
+Connected to postgres admin DB
+Terminated all connections to placement_prep
+Dropped placement_prep database
+Created fresh placement_prep database
+
+Connected to fresh placement_prep database
+Created users table
+Created aptitude_scores table
+Created availability table
+Created bookings table
+Created all indexes
+Test insert id: 1
+User count: 1
+Cleaned up test data, reset sequences
+
+✅ Database completely reset and ready!
